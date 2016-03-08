@@ -5,10 +5,12 @@
  * Kenneth Falck <kennu@iki.fi> 2016
  */
 
-module.exports = function(ServerlessPlugin) { // Always pass in the ServerlessPlugin Class
+module.exports = function(ServerlessPlugin, serverlessPath) { // Always pass in the ServerlessPlugin Class
 
   const path    = require('path'),
       fs        = require('fs'),
+      SUtils    = require(path.join(serverlessPath, 'utils/index')),
+      SCli      = require(path.join(serverlessPath, 'utils/cli')),
       BbPromise = require('bluebird'); // Serverless uses Bluebird Promises and we recommend you do to because they provide more than your average Promise :)
 
   /**
@@ -54,7 +56,7 @@ module.exports = function(ServerlessPlugin) { // Always pass in the ServerlessPl
      */
 
     registerHooks() {
-      this.S.addHook(this._hookPost.bind(this), {
+      this.S.addHook(this._hookPostFunctionDeploy.bind(this), {
         action: 'functionDeploy',
         event:  'post'
       });
@@ -69,18 +71,103 @@ module.exports = function(ServerlessPlugin) { // Always pass in the ServerlessPl
      * - You can also access other Project-specific data @ this.S Again, if you mess with data on this object, it could break everything, so make sure you know what you're doing ;)
      */
 
-    _hookPost(evt) {
+    _hookPostFunctionDeploy(evt) {
+      var self = this;
+      var promise = BbPromise.resolve();
+      Object.keys(evt.data.deployed).map(function (region) {
+        evt.data.deployed[region].map(function (func) {
+          promise = promise.then(function () {
+            return self.autopruneFunction({stage:evt.options.stage, region:region}, func)
+          });
+        });
+      });
+      return promise.then(function () {
+        return evt;
+      });
+    }
 
-      let _this = this;
+    listAllAliases(lambda, functionName) {
+      var self = this;
+      var allAliases = [];
 
-      return new BbPromise(function (resolve, reject) {
+      function getMore(nextMarker) {
+        return lambda.listAliasesPromise({
+          FunctionName: functionName,
+          Marker: nextMarker
+        })
+        .then(function (response) {
+          allAliases = allAliases.concat(response.Aliases);
+          if (response.NextMarker) {
+            return getMore(response.NextMarker);
+          } else {
+            return allAliases;
+          }
+        });
+      }
+      return getMore();
+    }
 
-        console.log('-------------------');
-        console.log('Autopruning Lambda function', JSON.stringify(evt.data));
-        console.log('-------------------');
+    listAllVersions(lambda, functionName) {
+      var self = this;
+      var allVersions = [];
 
-        return resolve(evt);
+      function getMore(nextMarker) {
+        return lambda.listVersionsByFunctionPromise({
+          FunctionName: functionName,
+          Marker: nextMarker
+        })
+        .then(function (response) {
+          allVersions = allVersions.concat(response.Versions);
+          if (response.NextMarker) {
+            return getMore(response.NextMarker);
+          } else {
+            return allVersions;
+          }
+        });
+      }
+      return getMore();
+    }
 
+    autopruneFunction(options, func) {
+      var self = this;
+      var AWS = require('aws-sdk');
+      var lambda = new AWS.Lambda({region:options.region, accessKeyId:this.S.config.awsAdminKeyId, secretAccessKey:this.S.config.awsAdminSecretKey});
+      var versions;
+      var aliases;
+      var aliasMap = {};
+      BbPromise.promisifyAll(lambda, {suffix:'Promise'});
+      return self.listAllVersions(lambda, func.functionName)
+      .then(function (aVersions) {
+        versions = aVersions;
+        return self.listAllAliases(lambda, func.functionName);
+      })
+      .then(function (aAliases) {
+        aliases = aAliases;
+        if (!aliases.length) {
+          // No aliases, don't autoprune everything
+          SCli.log('Skipping autoprune for ' + func.functionName + ' because it has no aliases defined.');
+          return;
+        }
+        aliases.map(function (alias) {
+          aliasMap[alias.FunctionVersion] = alias.Name;
+        });
+        var promise = BbPromise.resolve();
+        versions.map(function (version) {
+          if (version.Version.match(/^\d+$/)) {
+            if (!aliasMap[version.Version]) {
+              promise = promise.then(function () {
+                SCli.log('Autopruning ' + func.functionName + ' version ' + version.Version);
+                return lambda.deleteFunctionPromise({
+                  FunctionName: func.functionName,
+                  Qualifier: version.Version
+                });
+              });
+            } else {
+              SCli.log('Keeping ' + func.functionName + ' version ' + version.Version + ' (has alias ' + aliasMap[version.Version] + ')');
+            }
+          }
+        });
+        return promise;
       });
     }
   }
