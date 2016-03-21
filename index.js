@@ -74,7 +74,7 @@ module.exports = function(ServerlessPlugin, serverlessPath) { // Always pass in 
     _hookPostFunctionDeploy(evt) {
       var self = this;
       var promise = BbPromise.resolve();
-      Object.keys(evt.data.deployed).map(function (region) {
+      Object.keys(evt.data.deployed || []).map(function (region) {
         evt.data.deployed[region].map(function (func) {
           promise = promise.then(function () {
             return self.autopruneFunction({stage:evt.options.stage, region:region}, func)
