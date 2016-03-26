@@ -1,6 +1,6 @@
 {
   "name": "serverless-plugin-autoprune",
-  "version": "0.1.2",
+  "version": "0.5.1",
   "engines": {
     "node": ">=4.0"
   },
