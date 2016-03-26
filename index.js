@@ -145,8 +145,6 @@ module.exports = function(S) {
         if (evt.options.function.length && found < evt.options.function.length) {
           return BbPromise.reject(new SError('Function not found'));
         }
-
-        // return this.autopruneFunction({stage:evt.options.stage, region:evt.options.region}, func)
         return promise;
       })
       .then(() => {
@@ -177,15 +175,15 @@ module.exports = function(S) {
       });
     }
 
-    listAllAliases(lambda, functionName) {
+    listAllAliases(aws, stage, region, functionName) {
       var self = this;
       var allAliases = [];
 
       function getMore(nextMarker) {
-        return lambda.listAliasesPromise({
+        return aws.request('Lambda', 'listAliases', {
           FunctionName: functionName,
           Marker: nextMarker
-        })
+        }, stage, region)
         .then(function (response) {
           allAliases = allAliases.concat(response.Aliases);
           if (response.NextMarker) {
@@ -198,15 +196,15 @@ module.exports = function(S) {
       return getMore();
     }
 
-    listAllVersions(lambda, functionName) {
+    listAllVersions(aws, stage, region, functionName) {
       var self = this;
       var allVersions = [];
 
       function getMore(nextMarker) {
-        return lambda.listVersionsByFunctionPromise({
+        return aws.request('Lambda', 'listVersionsByFunction', {
           FunctionName: functionName,
           Marker: nextMarker
-        })
+        }, stage, region)
         .then(function (response) {
           allVersions = allVersions.concat(response.Versions);
           if (response.NextMarker) {
@@ -221,17 +219,14 @@ module.exports = function(S) {
 
     autopruneFunction(options, func) {
       var self = this;
-      var AWS = require('aws-sdk');
       var functionName = func.getDeployedName(options);
-      var lambda = new AWS.Lambda({region:options.region, accessKeyId:S.config.awsAdminKeyId, secretAccessKey:S.config.awsAdminSecretKey});
       var versions;
       var aliases;
       var aliasMap = {};
-      BbPromise.promisifyAll(lambda, {suffix:'Promise'});
-      return self.listAllVersions(lambda, functionName)
+      return self.listAllVersions(S.providers.aws, options.stage, options.region, functionName)
       .then(function (aVersions) {
         versions = aVersions;
-        return self.listAllAliases(lambda, functionName);
+        return self.listAllAliases(S.providers.aws, options.stage, options.region, functionName);
       })
       .then(function (aAliases) {
         aliases = aAliases;
@@ -249,10 +244,10 @@ module.exports = function(S) {
             if (!aliasMap[version.Version]) {
               promise = promise.then(function () {
                 SCli.log('Autopruning ' + functionName + ' version ' + version.Version);
-                return lambda.deleteFunctionPromise({
+                return S.providers.aws.request('Lambda', 'deleteFunction', {
                   FunctionName: functionName,
                   Qualifier: version.Version
-                });
+                }, options.stage, options.region);
               });
             } else {
               SCli.log('Keeping ' + functionName + ' version ' + version.Version + ' (has alias ' + aliasMap[version.Version] + ')');
