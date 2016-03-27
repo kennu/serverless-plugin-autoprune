@@ -18,3 +18,13 @@ the plugin as follows:
     plugins: [
         "serverless-plugin-autoprune"
     ]
+
+## Usage
+
+The plugin will automatically clean up old Lambda function versions whenever
+a function is deployed using Serverless.
+
+You may also use the Serverless CLI to run autoprune manually:
+
+    sls function autoprune -s dev -a
+    sls function autoprune -s prod <function-name>
