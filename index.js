@@ -47,7 +47,7 @@ module.exports = function(S) {
 
     registerActions() {
       S.addAction(this.autoprune.bind(this), {
-        handler:        'autoprune',
+        handler:        'functionAutoprune',
         description:    'Automatically deletes old Lambda function versions not attached to a stage',
         context:        'function',
         contextAction:  'autoprune',
