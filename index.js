@@ -99,6 +99,7 @@ module.exports = function(S) {
       var found = 0;
       var stage = evt.options.stage;
       var region = evt.options.region;
+      var stats = {deleted:0, kept:0, skipped:0};
 
       if (!evt.options.all && !evt.options.function.length) {
         return BbPromise.reject(new SError('Function name or -a required'));
@@ -138,7 +139,7 @@ module.exports = function(S) {
           if (evt.options.all || evt.options.function.indexOf(functionName) >= 0) {
             found += 1;
             promise = promise.then(() => {
-              return this.autopruneFunction({stage:stage, region:region}, functions[functionName]);
+              return this.autopruneFunction({stage:stage, region:region, stats:stats}, functions[functionName]);
             });
           }
         });
@@ -148,6 +149,7 @@ module.exports = function(S) {
         return promise;
       })
       .then(() => {
+        SCli.log('Autoprune deleted ' + stats.deleted + ', kept ' + stats.kept + ' and skipped ' + stats.skipped + ' function version(s)');
         return evt;
       });
     }
@@ -162,15 +164,17 @@ module.exports = function(S) {
     _hookPostFunctionDeploy(evt) {
       var self = this;
       var promise = BbPromise.resolve();
+      var stats = {deleted:0, kept:0, skipped:0};
       Object.keys(evt.data.deployed || []).map(function (region) {
         evt.data.deployed[region].map(function (deployed) {
           var func = S.getProject().getFunction(deployed.functionName);
           promise = promise.then(function () {
-            return self.autopruneFunction({stage:evt.options.stage, region:region}, func)
+            return self.autopruneFunction({stage:evt.options.stage, region:region, stats:stats}, func)
           });
         });
       });
       return promise.then(function () {
+        SCli.log('Autoprune deleted ' + stats.deleted + ', kept ' + stats.kept + ' and skipped ' + stats.skipped + ' function version(s)');
         return evt;
       });
     }
@@ -232,7 +236,8 @@ module.exports = function(S) {
         aliases = aAliases;
         if (!aliases.length) {
           // No aliases, don't autoprune everything
-          SCli.log('Skipping autoprune for ' + functionName + ' because it has no aliases defined.');
+          //SCli.log('Skipping autoprune for ' + functionName + ' because it has no aliases defined.');
+          options.stats.skipped += 1;
           return;
         }
         aliases.map(function (alias) {
@@ -243,14 +248,16 @@ module.exports = function(S) {
           if (version.Version.match(/^\d+$/)) {
             if (!aliasMap[version.Version]) {
               promise = promise.then(function () {
-                SCli.log('Autopruning ' + functionName + ' version ' + version.Version);
+                //SCli.log('Autopruning ' + functionName + ' version ' + version.Version);
+                options.stats.deleted += 1;
                 return S.providers.aws.request('Lambda', 'deleteFunction', {
                   FunctionName: functionName,
                   Qualifier: version.Version
                 }, options.stage, options.region);
               });
             } else {
-              SCli.log('Keeping ' + functionName + ' version ' + version.Version + ' (has alias ' + aliasMap[version.Version] + ')');
+              //SCli.log('Keeping ' + functionName + ' version ' + version.Version + ' (has alias ' + aliasMap[version.Version] + ')');
+              options.stats.kept += 1;
             }
           }
         });
